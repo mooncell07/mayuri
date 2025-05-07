@@ -1,0 +1,13 @@
+[package]
+name = "mayuri"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+sha1 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+byteorder = "1.5.0"
+uris = "0.1.1"
+thiserror = "2.0.12"
