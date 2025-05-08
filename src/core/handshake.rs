@@ -1,4 +1,4 @@
-use super::errors::{HandshakeFailureError, URIError, WebsocketError};
+use super::errors::{HandshakeFailureError, URIError, WebSocketError};
 use super::frame::HandshakeHeaders;
 use super::utils::{CRLF, get_host, get_resource_target};
 use base64::Engine;
@@ -20,7 +20,7 @@ impl<'a> Handshake<'a> {
     pub fn new(tcp_stream: &'a mut TcpStream, uri: &'a Uri) -> Handshake<'a> {
         Self { tcp_stream, uri }
     }
-    pub async fn run(&mut self) -> Result<(), WebsocketError> {
+    pub async fn run(&mut self) -> Result<(), WebSocketError> {
         let security_key = Self::_generate_security_key();
         let handshake_payload = Self::_get_handshake_payload(self.uri, security_key.as_str())?;
         self.tcp_stream

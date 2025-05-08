@@ -30,7 +30,7 @@ pub enum ConnectionError {
 }
 
 #[derive(Error, Debug)]
-pub enum WebsocketError {
+pub enum WebSocketError {
     #[error("[Handshake Failure] {0}")]
     Handshake(#[from] HandshakeFailureError),
 

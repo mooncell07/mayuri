@@ -62,7 +62,7 @@ pub struct Frame {
     pub mask: bool,
     pub payload_len: u8,
     pub payload_len_ext: u64,
-    pub masking_key: u32,
+    pub masking_key: Option<u32>,
     pub payload_data: Vec<u8>,
 }
 
@@ -93,8 +93,8 @@ impl Frame {
         } else {
             0u64
         };
-        let mut payload_data = vec![0u8; final_payload_len as usize];
 
+        let mut payload_data = vec![0u8; final_payload_len as usize];
         cursor.read_exact(&mut payload_data)?;
 
         Ok(Self {
@@ -106,7 +106,7 @@ impl Frame {
             mask,
             payload_len,
             payload_len_ext,
-            masking_key: 0,
+            masking_key: None,
             payload_data,
         })
     }
@@ -130,19 +130,21 @@ impl Frame {
             cursor.write_u64::<BigEndian>(self.payload_len_ext)?;
         }
 
-        cursor.write_u32::<BigEndian>(self.masking_key)?;
-
+        let masking_key = 0u32;
+        cursor.write_u32::<BigEndian>(masking_key)?;
         for (i, byte) in self.payload_data.iter_mut().enumerate() {
             let key = 3 - (i % 4);
-            *byte ^= ((self.masking_key >> (8 * key)) & 0xFF) as u8;
+            *byte ^= ((masking_key >> (8 * key)) & 0xFF) as u8;
         }
+
+        self.masking_key = Some(masking_key);
 
         cursor.write_all(&self.payload_data)?;
         Ok(cursor.into_inner())
     }
 
     pub fn set_defaults(opcode: Opcode, data: &[u8]) -> Self {
-        let (payload_len, payload_len_ext) = Self::_set_payload_len(data.len());
+        let (payload_len, payload_len_ext) = Self::_get_payload_len(data.len());
         let masking_key = Self::_get_masking_key();
 
         Self {
@@ -159,7 +161,7 @@ impl Frame {
         }
     }
 
-    pub fn _set_payload_len(len: usize) -> (u8, u64) {
+    pub fn _get_payload_len(len: usize) -> (u8, u64) {
         if len < MIN_VAL_FOR_16_BIT_UPGRADE as usize {
             (len as u8, 0u64)
         } else if len <= 0xFFFF {
@@ -169,8 +171,8 @@ impl Frame {
         }
     }
 
-    pub fn _get_masking_key() -> u32 {
+    pub fn _get_masking_key() -> Option<u32> {
         let mut rng = rand::rng();
-        rng.next_u32()
+        Some(rng.next_u32())
     }
 }

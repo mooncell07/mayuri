@@ -1,2 +1,2 @@
 pub mod core;
-pub use core::websocket::Websocket;
+pub use core::websocket::WebSocket;

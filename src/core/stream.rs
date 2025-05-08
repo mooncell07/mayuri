@@ -1,6 +1,6 @@
 use super::enums::State;
 use super::errors::ConnectionError::{ReadError, WriteError};
-use super::errors::{ConnectionError, WebsocketError};
+use super::errors::{ConnectionError, WebSocketError};
 use super::handshake::Handshake;
 use super::utils::get_socket_address;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -13,7 +13,7 @@ pub struct Stream {
 }
 
 impl Stream {
-    pub async fn new(uri: &Uri) -> Result<Stream, WebsocketError> {
+    pub async fn new(uri: &Uri) -> Result<Stream, WebSocketError> {
         let addr = get_socket_address(uri)?;
         let mut tcp_stream = TcpStream::connect(addr).await?;
 
@@ -34,13 +34,13 @@ impl Stream {
             State::OPEN => match self.tcp_stream.read(&mut buf).await {
                 Ok(0) => {
                     self.state = State::CLOSED;
-                    Err(ReadError("Unexpected EoF".into()))
+                    Err(ReadError("Unexpected EOF".into()))
                 }
 
                 Ok(_n) => Ok(()),
                 Err(err) => {
                     self.state = State::CLOSED;
-                    Err(ReadError(format!("Unexpected EoF: {err}")))
+                    Err(ReadError(format!("Unexpected EOF: {err}")))
                 }
             },
             _ => Err(ReadError(format!("Unknown State {:?}", self.state))),
