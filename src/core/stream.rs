@@ -1,6 +1,8 @@
-use super::enums::State;
+use super::context::Context;
+use super::enums::{Event, State};
 use super::errors::ConnectionError::{ReadError, WriteError};
 use super::errors::{ConnectionError, WebSocketError};
+use super::frame::Frame;
 use super::handshake::Handshake;
 use super::utils::get_socket_address;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -10,10 +12,11 @@ use uris::Uri;
 pub struct Stream {
     tcp_stream: TcpStream,
     pub state: State,
+    callbacks: Vec<fn(&Context)>,
 }
 
 impl Stream {
-    pub async fn new(uri: &Uri) -> Result<Stream, WebSocketError> {
+    pub async fn new(uri: &Uri, callbacks: Vec<fn(&Context)>) -> Result<Stream, WebSocketError> {
         let addr = get_socket_address(uri)?;
         let mut tcp_stream = TcpStream::connect(addr).await?;
 
@@ -25,25 +28,38 @@ impl Stream {
         Ok(Self {
             tcp_stream,
             state: State::OPEN,
+            callbacks,
         })
     }
 
-    pub async fn read(&mut self) -> Result<(), ConnectionError> {
-        let mut buf: [u8; 128] = [0; 128];
+    pub async fn read(&mut self) -> Result<(), WebSocketError> {
+        let mut buf: [u8; 4096] = [0; 4096];
         match self.state {
             State::OPEN => match self.tcp_stream.read(&mut buf).await {
                 Ok(0) => {
                     self.state = State::CLOSED;
-                    Err(ReadError("Unexpected EOF".into()))
+                    Err(WebSocketError::Stream(ReadError("Unexpected EOF".into())))
                 }
 
-                Ok(_n) => Ok(()),
+                Ok(_n) => {
+                    let frame = Frame::decode(&buf)?;
+                    let ctx = Context::new(Event::OnMESSAGE, frame);
+                    for func in self.callbacks.iter() {
+                        func(&ctx);
+                    }
+                    Ok(())
+                }
                 Err(err) => {
                     self.state = State::CLOSED;
-                    Err(ReadError(format!("Unexpected EOF: {err}")))
+                    Err(WebSocketError::Stream(ReadError(format!(
+                        "Unexpected EOF: {err}"
+                    ))))
                 }
             },
-            _ => Err(ReadError(format!("Unknown State {:?}", self.state))),
+            _ => Err(WebSocketError::Stream(ReadError(format!(
+                "Unknown State {:?}",
+                self.state
+            )))),
         }
     }
 

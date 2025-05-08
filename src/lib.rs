@@ -1,5 +1,5 @@
 pub mod core;
-
+pub use core::context::Context;
 use core::enums::Opcode;
 use core::errors::WebSocketError;
 use core::frame::Frame;
@@ -13,9 +13,12 @@ pub struct WebSocket {
 }
 
 impl WebSocket {
-    pub async fn connect(uri_string: &str) -> Result<WebSocket, WebSocketError> {
+    pub async fn connect(
+        uri_string: &str,
+        callbacks: Vec<fn(&Context)>,
+    ) -> Result<WebSocket, WebSocketError> {
         let uri = get_uri(uri_string)?;
-        let _stream = Stream::new(&uri).await?;
+        let _stream = Stream::new(&uri, callbacks).await?;
 
         Ok(Self { _stream })
     }
@@ -28,9 +31,9 @@ impl WebSocket {
         Ok(())
     }
 
-    pub async fn listen(&mut self) -> Result<(), WebSocketError> {
-        self._stream.read().await?;
-
-        Ok(())
+    pub async fn run(&mut self) -> Result<(), WebSocketError> {
+        loop {
+            self._stream.read().await?
+        }
     }
 }

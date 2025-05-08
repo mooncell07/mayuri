@@ -2,6 +2,8 @@ use std::io;
 use thiserror::Error;
 use uris;
 
+use std::string::FromUtf8Error;
+
 #[derive(Error, Debug)]
 pub enum HandshakeFailureError {
     #[error("Invalid Handshake Header")]
@@ -30,6 +32,12 @@ pub enum ConnectionError {
 }
 
 #[derive(Error, Debug)]
+pub enum ParseError {
+    #[error("Error converting payload to UTF-8: {0}")]
+    Utf8Error(#[from] FromUtf8Error),
+}
+
+#[derive(Error, Debug)]
 pub enum WebSocketError {
     #[error("[Handshake Failure] {0}")]
     Handshake(#[from] HandshakeFailureError),
@@ -39,6 +47,9 @@ pub enum WebSocketError {
 
     #[error("[Connection Error] {0}")]
     Stream(#[from] ConnectionError),
+
+    #[error("[Parse Error] {0}")]
+    Parse(#[from] ParseError),
 
     #[error("[IO Error] {0}")]
     Io(#[from] io::Error),
