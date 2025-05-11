@@ -5,31 +5,41 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use rand::RngCore;
 use sha1::{Digest, Sha1};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use uris::Uri;
 
 const __GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 pub struct Handshake<'a> {
-    tcp_stream: &'a mut TcpStream,
+    tcp_reader: &'a mut ReadHalf<TcpStream>,
+    tcp_writer: &'a mut WriteHalf<TcpStream>,
+
     uri: &'a Uri,
 }
 
 impl<'a> Handshake<'a> {
-    pub fn new(tcp_stream: &'a mut TcpStream, uri: &'a Uri) -> Handshake<'a> {
-        Self { tcp_stream, uri }
+    pub fn new(
+        tcp_reader: &'a mut ReadHalf<TcpStream>,
+        tcp_writer: &'a mut WriteHalf<TcpStream>,
+        uri: &'a Uri,
+    ) -> Handshake<'a> {
+        Self {
+            tcp_reader,
+            tcp_writer,
+            uri,
+        }
     }
     pub async fn run(&mut self) -> Result<(), WebSocketError> {
         let security_key = Self::_generate_security_key();
         let handshake_payload = Self::_get_handshake_payload(self.uri, security_key.as_str())?;
-        self.tcp_stream
+        self.tcp_writer
             .write_all(handshake_payload.as_bytes())
             .await?;
 
         let mut buf: [u8; 4096] = [0; 4096];
 
-        self.tcp_stream.read(&mut buf).await?;
+        self.tcp_reader.read(&mut buf).await?;
         let resp = String::from_utf8_lossy(&buf).to_string();
         let handshake_headers = HandshakeHeaders::new(&resp)?;
         Self::_validate_accept(

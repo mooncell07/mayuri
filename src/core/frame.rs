@@ -52,7 +52,7 @@ impl HandshakeHeaders {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Frame {
     pub fin: bool,
     pub rsv1: bool,

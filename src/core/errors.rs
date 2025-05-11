@@ -35,6 +35,9 @@ pub enum ConnectionError {
 pub enum ParseError {
     #[error("Error converting payload to UTF-8: {0}")]
     Utf8Error(#[from] FromUtf8Error),
+
+    #[error("Frame Error: {0}")]
+    FrameError(String),
 }
 
 #[derive(Error, Debug)]

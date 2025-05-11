@@ -1,11 +1,12 @@
 pub mod core;
 pub use core::context::Context;
+pub use core::stream::AsyncListeners;
+
 use core::enums::Opcode;
 use core::errors::WebSocketError;
 use core::frame::Frame;
-use core::stream::Stream;
+use core::stream::{Stream, write_stream};
 use core::utils::get_uri;
-
 use std::str;
 
 pub struct WebSocket {
@@ -15,18 +16,20 @@ pub struct WebSocket {
 impl WebSocket {
     pub async fn connect(
         uri_string: &str,
-        callbacks: Vec<fn(&Context)>,
+        listeners: Vec<AsyncListeners>,
     ) -> Result<WebSocket, WebSocketError> {
         let uri = get_uri(uri_string)?;
-        let _stream = Stream::new(&uri, callbacks).await?;
+        let _stream = Stream::new(&uri, listeners).await?;
 
         Ok(Self { _stream })
     }
 
-    pub async fn send(&mut self, data: &str) -> Result<(), WebSocketError> {
-        let mut frame = Frame::set_defaults(Opcode::Text, data.as_bytes());
-        let mut data = frame.encode()?;
-        self._stream.write(&mut data).await?;
+    pub async fn send(&mut self, msg: &str) -> Result<(), WebSocketError> {
+        let mut frame = Frame::set_defaults(Opcode::Text, msg.as_bytes());
+        let data = frame.encode()?;
+        let mut writer = self._stream.tcp_writer.lock().await;
+
+        write_stream(&mut writer, &self._stream.state, &data).await?;
 
         Ok(())
     }

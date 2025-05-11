@@ -1,6 +1,6 @@
 use std::io;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     OnCONNECT,
     OnMESSAGE,
@@ -8,7 +8,7 @@ pub enum Event {
     OnDISCONNECT,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum State {
     CONNECTING = 0,
     OPEN = 1,
