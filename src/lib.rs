@@ -1,6 +1,10 @@
 pub mod core;
+
 pub use core::context::Context;
-pub use core::stream::AsyncListeners;
+pub use core::enums::Event;
+pub use core::listener;
+pub use core::stream;
+pub use registry::register;
 
 use core::enums::Opcode;
 use core::errors::WebSocketError;
@@ -14,12 +18,9 @@ pub struct WebSocket {
 }
 
 impl WebSocket {
-    pub async fn connect(
-        uri_string: &str,
-        listeners: Vec<AsyncListeners>,
-    ) -> Result<WebSocket, WebSocketError> {
+    pub async fn connect(uri_string: &str) -> Result<WebSocket, WebSocketError> {
         let uri = get_uri(uri_string)?;
-        let _stream = Stream::new(&uri, listeners).await?;
+        let _stream = Stream::new(&uri).await?;
 
         Ok(Self { _stream })
     }

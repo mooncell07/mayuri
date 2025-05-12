@@ -1,30 +1,30 @@
 use super::context::Context;
 use super::enums::{Event, State};
-use super::errors::ConnectionError::{ReadError, WriteError};
 use super::errors::{ConnectionError, WebSocketError};
+use super::errors::{
+    ConnectionError::{ReadError, WriteError},
+    ParseError,
+};
 use super::frame::Frame;
 use super::handshake::Handshake;
+use super::listener::LISTENER_FUTURE_INFO_SLICE;
 use super::utils::get_socket_address;
-use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::split;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-
 use uris::Uri;
-
-pub type AsyncListeners = Box<dyn Fn(Arc<Context>) -> Pin<Box<dyn Future<Output = ()>>>>;
 
 pub struct Stream {
     pub tcp_writer: Arc<Mutex<WriteHalf<TcpStream>>>,
     tcp_reader: ReadHalf<TcpStream>,
     pub state: State,
-    listeners: Vec<AsyncListeners>,
 }
 
 impl Stream {
-    pub async fn new(uri: &Uri, listeners: Vec<AsyncListeners>) -> Result<Stream, WebSocketError> {
+    pub async fn new(uri: &Uri) -> Result<Stream, WebSocketError> {
         let addr = get_socket_address(uri)?;
         let (mut tcp_reader, mut tcp_writer) = split(TcpStream::connect(addr).await?);
 
@@ -40,22 +40,22 @@ impl Stream {
             tcp_writer: shareable_tcp_writer,
             tcp_reader,
             state,
-            listeners,
         };
 
-        stream.post_new().await;
+        stream.post_new().await?;
 
         Ok(stream)
     }
 
-    pub async fn post_new(&self) {
+    pub async fn post_new(&self) -> Result<(), ParseError> {
         let ctx = Arc::new(Context::new(
             self.state,
             Event::OnCONNECT,
             None,
             Arc::clone(&self.tcp_writer),
         ));
-        self.broadcast(ctx).await;
+        self.broadcast(ctx).await?;
+        Ok(())
     }
 
     pub async fn read(&mut self) -> Result<(), WebSocketError> {
@@ -71,13 +71,13 @@ impl Stream {
                     let frame = Frame::decode(&buf)?;
                     let writer = Arc::clone(&self.tcp_writer);
                     let ctx = Arc::new(Context::new(
-                        self.state.clone(),
+                        self.state,
                         Event::OnMESSAGE,
                         Some(frame),
                         writer,
                     ));
 
-                    self.broadcast(ctx).await;
+                    self.broadcast(ctx).await?;
 
                     Ok(())
                 }
@@ -95,10 +95,14 @@ impl Stream {
         }
     }
 
-    pub async fn broadcast(&self, context: Arc<Context>) {
-        for func in self.listeners.iter() {
-            func(Arc::clone(&context)).await;
+    pub async fn broadcast(&self, context: Arc<Context>) -> Result<(), ParseError> {
+        for listener_future_info in LISTENER_FUTURE_INFO_SLICE.iter() {
+            if Event::from_str(listener_future_info.belongs_to)? == context.belongs_to {
+                (listener_future_info.listener_future_callback)(Arc::clone(&context)).await;
+            }
         }
+
+        Ok(())
     }
 }
 

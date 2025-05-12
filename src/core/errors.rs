@@ -3,6 +3,7 @@ use thiserror::Error;
 use uris;
 
 use std::string::FromUtf8Error;
+use strum;
 
 #[derive(Error, Debug)]
 pub enum HandshakeFailureError {
@@ -38,6 +39,9 @@ pub enum ParseError {
 
     #[error("Frame Error: {0}")]
     FrameError(String),
+
+    #[error("Invalid Event Error: {0}")]
+    InvalidEventError(#[from] strum::ParseError),
 }
 
 #[derive(Error, Debug)]

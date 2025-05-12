@@ -27,12 +27,12 @@ impl Context {
         frame: Option<Frame>,
         tcp_writer: Arc<Mutex<WriteHalf<TcpStream>>>,
     ) -> Context {
-        return Self {
+        Self {
             state,
             belongs_to: event,
             frame,
             tcp_writer,
-        };
+        }
     }
 
     pub fn read_text(&self) -> Result<String, WebSocketError> {
