@@ -25,16 +25,6 @@ impl WebSocket {
         Ok(Self { _stream })
     }
 
-    pub async fn send(&mut self, msg: &str) -> Result<(), WebSocketError> {
-        let mut frame = Frame::set_defaults(Opcode::Text, msg.as_bytes());
-        let data = frame.encode()?;
-        let mut writer = self._stream.tcp_writer.lock().await;
-
-        write_stream(&mut writer, &self._stream.state, &data).await?;
-
-        Ok(())
-    }
-
     pub async fn run(&mut self) -> Result<(), WebSocketError> {
         loop {
             self._stream.read().await?
