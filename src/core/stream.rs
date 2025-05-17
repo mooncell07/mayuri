@@ -48,12 +48,12 @@ impl Stream {
     }
 
     pub async fn post_new(&self) -> Result<(), ParseError> {
-        let ctx = Arc::new(Context::new(
+        let ctx = Context::new(
             self.state,
             Event::OnCONNECT,
             None,
             Arc::clone(&self.tcp_writer),
-        ));
+        );
         self.broadcast(ctx).await?;
         Ok(())
     }
@@ -68,14 +68,14 @@ impl Stream {
                 }
 
                 Ok(_n) => {
-                    let frame = Frame::decode(&buf)?;
+                    let frame = Arc::new(Frame::decode(&buf)?);
                     let writer = Arc::clone(&self.tcp_writer);
-                    let ctx = Arc::new(Context::new(
+                    let ctx = Context::new(
                         self.state,
                         Event::OnMESSAGE,
-                        Some(frame),
+                        Some(Arc::clone(&frame)),
                         writer,
-                    ));
+                    );
 
                     self.broadcast(ctx).await?;
 
@@ -95,7 +95,7 @@ impl Stream {
         }
     }
 
-    pub async fn broadcast(&self, context: Arc<Context>) -> Result<(), ParseError> {
+    pub async fn broadcast(&self, context: Context) -> Result<(), ParseError> {
         for listener_future_info in LISTENER_FUTURE_INFO_SLICE.iter() {
             let user_event = listener_future_info.belongs_to;
             let mapped_event =
@@ -104,8 +104,11 @@ impl Stream {
                     source: e,
                 })?;
             if mapped_event == context.belongs_to {
-                (listener_future_info.listener_future_callback)(Arc::clone(&context)).await;
-            }
+                let ctx = context.clone();
+                tokio::spawn(async move {
+                    (listener_future_info.listener_future_callback)(ctx).await;
+                });
+            };
         }
 
         Ok(())

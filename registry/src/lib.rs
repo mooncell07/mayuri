@@ -69,7 +69,7 @@ pub fn bind(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #input_fn
-        fn #fn_wrapper_name(ctx: ::std::sync::Arc<::mayuri::core::context::Context>) -> #mayuri::core::listener::ListenerFuture {
+        fn #fn_wrapper_name(ctx: ::mayuri::core::context::Context) -> #mayuri::core::listener::ListenerFuture {
             Box::pin(#fn_name(ctx))
         }
 

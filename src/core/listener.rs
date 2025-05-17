@@ -1,12 +1,11 @@
 use super::context::Context;
 use linkme::distributed_slice;
 use std::pin::Pin;
-use std::sync::Arc;
 
-pub type ListenerFuture = Pin<Box<dyn Future<Output = ()>>>;
+pub type ListenerFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 pub struct ListenerFutureInfo {
-    pub listener_future_callback: fn(Arc<Context>) -> ListenerFuture,
+    pub listener_future_callback: fn(Context) -> ListenerFuture,
     pub belongs_to: &'static str,
 }
 

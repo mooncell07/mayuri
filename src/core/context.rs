@@ -16,7 +16,7 @@ use tokio::sync::Mutex;
 pub struct Context {
     pub state: State,
     pub belongs_to: Event,
-    frame: Option<Frame>,
+    frame: Option<Arc<Frame>>,
     tcp_writer: Arc<Mutex<WriteHalf<TcpStream>>>,
 }
 
@@ -24,7 +24,7 @@ impl Context {
     pub fn new(
         state: State,
         event: Event,
-        frame: Option<Frame>,
+        frame: Option<Arc<Frame>>,
         tcp_writer: Arc<Mutex<WriteHalf<TcpStream>>>,
     ) -> Context {
         Self {
