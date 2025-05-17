@@ -17,3 +17,5 @@ uris = "0.1.1"
 thiserror = "2.0.12"
 linkme = "0.3"
 strum = { version = "0.27", features = ["derive"] }
+log = "0.4.27"
+env_logger = "0.11.8"

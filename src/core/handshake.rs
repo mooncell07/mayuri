@@ -3,6 +3,7 @@ use super::frame::HandshakeHeaders;
 use super::utils::{CRLF, get_host, get_resource_target};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
+use log::debug;
 use rand::RngCore;
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
@@ -37,11 +38,23 @@ impl<'a> Handshake<'a> {
             .write_all(handshake_payload.as_bytes())
             .await?;
 
+        debug!("Handshake Bytes sent to the server");
+
         let mut buf: [u8; 4096] = [0; 4096];
 
         self.tcp_reader.read(&mut buf).await?;
         let resp = String::from_utf8_lossy(&buf).to_string();
+
+        debug!("Handshake Response received from the server");
         let handshake_headers = HandshakeHeaders::new(&resp)?;
+
+        debug!(
+            "Handshake Status: Version: {} | Status Code: {} | {}",
+            handshake_headers.http_version,
+            handshake_headers.http_status_code,
+            handshake_headers.http_status_text
+        );
+
         Self::_validate_accept(
             handshake_headers.headers["sec-websocket-accept"].as_str(),
             security_key,
@@ -71,6 +84,7 @@ impl<'a> Handshake<'a> {
         if accept_key != valid_accept_key {
             Err(HandshakeFailureError::ValidationError)
         } else {
+            debug!("`Sec-WebSocket-Accept` from Server's Handshake Bytes has been validated");
             Ok(())
         }
     }

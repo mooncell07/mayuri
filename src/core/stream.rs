@@ -9,6 +9,7 @@ use super::frame::Frame;
 use super::handshake::Handshake;
 use super::listener::LISTENER_FUTURE_INFO_SLICE;
 use super::utils::get_socket_address;
+use log::{debug, info};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::io::split;
@@ -28,10 +29,12 @@ impl Stream {
         let addr = get_socket_address(uri)?;
         let (mut tcp_reader, mut tcp_writer) = split(TcpStream::connect(addr).await?);
 
+        debug!("Running handshake");
         {
             let mut handshake = Handshake::new(&mut tcp_reader, &mut tcp_writer, uri);
             handshake.run().await?;
         }
+        debug!("Handshake complete");
 
         let state = State::OPEN;
         let shareable_tcp_writer = Arc::new(Mutex::new(tcp_writer));
@@ -41,6 +44,8 @@ impl Stream {
             tcp_reader,
             state,
         };
+
+        info!("Connection established with {}", get_socket_address(uri)?);
 
         stream.post_new().await?;
 
@@ -76,7 +81,6 @@ impl Stream {
                         Some(Arc::clone(&frame)),
                         writer,
                     );
-
                     self.broadcast(ctx).await?;
 
                     Ok(())
@@ -96,6 +100,7 @@ impl Stream {
     }
 
     pub async fn broadcast(&self, context: Context) -> Result<(), ParseError> {
+        info!("Broadcasting Event: `{:?}`", context.belongs_to);
         for listener_future_info in LISTENER_FUTURE_INFO_SLICE.iter() {
             let user_event = listener_future_info.belongs_to;
             let mapped_event =
@@ -122,7 +127,10 @@ pub async fn write_stream(
 ) -> Result<(), ConnectionError> {
     match state {
         State::OPEN => match tcp_writer.write_all(data).await {
-            Ok(_n) => Ok(()),
+            Ok(_n) => {
+                debug!("Sent {} bytes of data", data.len());
+                Ok(())
+            }
             Err(err) => Err(WriteError(format!("Couldn't Write to the Stream: {err}"))),
         },
         _ => Err(WriteError(format!("Unknown State {:?}", state))),

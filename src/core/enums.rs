@@ -2,17 +2,11 @@ use std::io;
 use strum::EnumString;
 
 #[derive(Debug, Clone, EnumString, PartialEq)]
+#[strum(serialize_all = "snake_case")]
 pub enum Event {
-    #[strum(serialize = "on_connect")]
     OnCONNECT,
-
-    #[strum(serialize = "on_message")]
     OnMESSAGE,
-
-    #[strum(serialize = "on_error")]
     OnERROR,
-
-    #[strum(serialize = "on_disconnect")]
     OnDISCONNECT,
 }
 
