@@ -19,28 +19,32 @@ fn get_crate(name: &str) -> proc_macro2::TokenStream {
     };
 }
 
-fn get_event(event_arg: TokenStream) -> String {
+fn get_event_name(event_arg: TokenStream) -> String {
     let parser = Punctuated::<Meta, Token![,]>::parse_terminated;
 
-    let args = parser.parse(event_arg).expect("Failed to parse Event Type");
+    let args = parser
+        .parse(event_arg)
+        .expect("Failed to parse Event Argument");
     let meta = &args[0];
 
     match meta {
         Meta::NameValue(nv) => {
             let name = nv.path.get_ident().unwrap().to_string();
-            if name != "event" {
-                let err = format!("Incorrect Identifier: {}\nPlease use 'event'", name);
-                panic!("{}", err);
+            if name != "to" {
+                panic!(
+                    "{}",
+                    format!("Incorrect Identifier: {}\nPlease use `to=`", name)
+                );
             }
             let value = match &nv.value {
                 Expr::Lit(s) => {
                     if let Lit::Str(e) = &s.lit {
                         e.value().to_lowercase()
                     } else {
-                        panic!("Incorrect Type for the event value, it should be string only.")
+                        panic!("Incorrect Type for the event value, it should be string only")
                     }
                 }
-                _ => panic!("Incorrect Type for the event value, it should be string only."),
+                _ => panic!("Invalid Expression in Event Argument"),
             };
             value
         }
@@ -53,7 +57,7 @@ fn get_event(event_arg: TokenStream) -> String {
 }
 
 #[proc_macro_attribute]
-pub fn register(args: TokenStream, item: TokenStream) -> TokenStream {
+pub fn bind(args: TokenStream, item: TokenStream) -> TokenStream {
     let mayuri = get_crate("mayuri");
 
     let input_fn: ItemFn = parse_macro_input!(item);
@@ -61,7 +65,7 @@ pub fn register(args: TokenStream, item: TokenStream) -> TokenStream {
     let fn_wrapper_name = format_ident!("__mayuri_wrap_{}", fn_name.to_string());
     let fn_registeration_name = format_ident!("__mayuri_register_{}", fn_name.to_string());
 
-    let event = get_event(args);
+    let event_name = get_event_name(args);
 
     let expanded = quote! {
         #input_fn
@@ -72,7 +76,7 @@ pub fn register(args: TokenStream, item: TokenStream) -> TokenStream {
         #[linkme::distributed_slice(#mayuri::listener::LISTENER_FUTURE_INFO_SLICE)]
         static #fn_registeration_name: #mayuri::core::listener::ListenerFutureInfo = #mayuri::core::listener::ListenerFutureInfo {
             listener_future_callback: #fn_wrapper_name,
-            belongs_to: #event,
+            belongs_to: #event_name,
         };
 
     };

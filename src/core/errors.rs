@@ -40,8 +40,13 @@ pub enum ParseError {
     #[error("Frame Error: {0}")]
     FrameError(String),
 
-    #[error("Invalid Event Error: {0}")]
-    InvalidEventError(#[from] strum::ParseError),
+    #[error("Invalid Event Error: {source} for `{error_event}`")]
+    InvalidEventError {
+        error_event: String,
+
+        #[source]
+        source: strum::ParseError,
+    },
 }
 
 #[derive(Error, Debug)]

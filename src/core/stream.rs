@@ -97,7 +97,13 @@ impl Stream {
 
     pub async fn broadcast(&self, context: Arc<Context>) -> Result<(), ParseError> {
         for listener_future_info in LISTENER_FUTURE_INFO_SLICE.iter() {
-            if Event::from_str(listener_future_info.belongs_to)? == context.belongs_to {
+            let user_event = listener_future_info.belongs_to;
+            let mapped_event =
+                Event::from_str(user_event).map_err(|e| ParseError::InvalidEventError {
+                    error_event: user_event.to_string(),
+                    source: e,
+                })?;
+            if mapped_event == context.belongs_to {
                 (listener_future_info.listener_future_callback)(Arc::clone(&context)).await;
             }
         }

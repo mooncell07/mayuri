@@ -4,7 +4,7 @@ pub use core::context::Context;
 pub use core::enums::Event;
 pub use core::listener;
 pub use core::stream;
-pub use registry::register;
+pub use registry::bind;
 
 use core::enums::Opcode;
 use core::errors::WebSocketError;
