@@ -6,10 +6,8 @@ pub use core::listener;
 pub use core::stream;
 pub use registry::bind;
 
-use core::enums::Opcode;
 use core::errors::WebSocketError;
-use core::frame::Frame;
-use core::stream::{Stream, write_stream};
+use core::stream::Stream;
 use core::utils::get_uri;
 use std::str;
 
