@@ -1,5 +1,4 @@
-use tokio::io::WriteHalf;
-use tokio::net::TcpStream;
+use tokio::io::AsyncWrite;
 
 use super::errors::{ConnectionError, ParseError};
 use super::stream::write_stream;
@@ -8,16 +7,16 @@ use super::{
     errors::WebSocketError,
     frame::Frame,
 };
+use tokio::sync::Mutex;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[derive(Clone)]
 pub struct Context {
     pub state: State,
     pub belongs_to: Event,
     frame: Option<Arc<Frame>>,
-    tcp_writer: Arc<Mutex<WriteHalf<TcpStream>>>,
+    tcp_writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
 }
 
 impl Context {
@@ -25,7 +24,7 @@ impl Context {
         state: State,
         event: Event,
         frame: Option<Arc<Frame>>,
-        tcp_writer: Arc<Mutex<WriteHalf<TcpStream>>>,
+        tcp_writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
     ) -> Context {
         Self {
             state,

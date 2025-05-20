@@ -7,14 +7,14 @@ pub use core::stream;
 pub use registry::bind;
 
 use core::errors::WebSocketError;
-use core::stream::Stream;
+use core::stream::{StreamBuilder, StreamType};
 use core::utils::{get_socket_address, get_uri};
 use listener::LISTENER_FUTURE_INFO_SLICE;
 use log::{debug, info};
 use std::str;
 
 pub struct WebSocket {
-    pub _stream: Stream,
+    stream: StreamType,
 }
 
 impl WebSocket {
@@ -29,15 +29,20 @@ impl WebSocket {
             "Attempting to create connection with {}",
             get_socket_address(&uri)?
         );
-        let _stream = Stream::new(&uri).await?;
 
-        Ok(Self { _stream })
+        let stream = StreamBuilder::new(uri, None).build_stream().await?;
+        Ok(Self { stream })
     }
 
     pub async fn run(&mut self) -> Result<(), WebSocketError> {
         debug!("Starting Event Loop");
-        loop {
-            self._stream.read().await?
-        }
+        match &mut self.stream {
+            StreamType::Plain(plain_stream) => loop {
+                plain_stream.read().await?;
+            },
+            StreamType::Secured(secured_stream) => loop {
+                secured_stream.read().await?;
+            },
+        };
     }
 }

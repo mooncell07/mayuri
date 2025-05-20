@@ -2,6 +2,7 @@ use std::io;
 use thiserror::Error;
 use uris;
 
+use rustls_pki_types::InvalidDnsNameError;
 use std::string::FromUtf8Error;
 use strum;
 
@@ -21,6 +22,9 @@ pub enum URIError {
 
     #[error("Malformed URI: {0}")]
     MalformedURIError(#[from] uris::Error),
+
+    #[error("DNS Error: {0}")]
+    DNSError(#[from] InvalidDnsNameError),
 }
 
 #[derive(Error, Debug)]
@@ -30,6 +34,9 @@ pub enum ConnectionError {
 
     #[error("Write Error: {0}")]
     WriteError(String),
+
+    #[error("Bad Connector: {0}")]
+    ConnectorError(String),
 }
 
 #[derive(Error, Debug)]
