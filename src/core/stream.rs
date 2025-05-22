@@ -1,14 +1,11 @@
-use crate::core::{enums::Opcode, frame::PartialFrame};
-
 use super::{
     context::Context,
-    enums::{Event, State},
+    enums::{Event, Opcode, State},
     errors::{
-        ConnectionError,
-        ConnectionError::{ReadError, WriteError},
+        ConnectionError::{self, ReadError, WriteError},
         ParseError, URIError, WebSocketError,
     },
-    frame::Frame,
+    frame::{Frame, Headers},
     handshake::Handshake,
     listener::LISTENER_FUTURE_INFO_SLICE,
     utils::{get_host, get_socket_address, is_secured},
@@ -16,9 +13,9 @@ use super::{
 use fluent_uri::Uri;
 use log::{debug, info};
 use rustls_pki_types::{CertificateDer, ServerName, pem::PemObject};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::{path::PathBuf, usize};
 use tokio::sync::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, split},
@@ -69,15 +66,26 @@ impl<R: AsyncRead + Unpin> Stream<R> {
         Ok(())
     }
 
-    pub async fn read_partial(&mut self) -> Result<PartialFrame, WebSocketError> {
+    pub async fn fetch_headers(&mut self) -> Result<Headers, WebSocketError> {
         let mut buf: [u8; 2] = [0; 2];
         match self.reader.read_exact(&mut buf).await {
             Ok(0) => Err(WebSocketError::Stream(ReadError(
                 "Couldn't read Frame Headers".into(),
             ))),
-            Ok(_n) => {
-                debug!("Received Frame Headers");
-                Ok(PartialFrame::decode(&buf)?)
+            Ok(n) => {
+                debug!("Received Frame Headers of length {n}");
+
+                let mut headers = Headers::decode(&buf)?;
+
+                let payload_len_ext = if headers.extend_by == 16 {
+                    u64::from(self.reader.read_u16().await?)
+                } else if headers.extend_by == 64 {
+                    self.reader.read_u64().await?
+                } else {
+                    0u64
+                };
+                headers.payload_len_ext = payload_len_ext;
+                Ok(headers)
             }
             Err(err) => Err(WebSocketError::Stream(ReadError(format!(
                 "Unexpected EOF while reading Frame Headers: {err}"
@@ -88,8 +96,19 @@ impl<R: AsyncRead + Unpin> Stream<R> {
     pub async fn read(&mut self) -> Result<(), WebSocketError> {
         match self.state {
             State::OPEN => {
-                let partial = self.read_partial().await?;
-                let mut buf = vec![0u8; partial.payload_len as usize];
+                let headers = self.fetch_headers().await?;
+
+                let final_payload_len = {
+                    if headers.extend_by > 0 {
+                        headers.payload_len_ext
+                    } else {
+                        u64::from(headers.payload_len)
+                    }
+                };
+
+                debug!("Frame Headers: {headers:?}");
+
+                let mut buf = vec![0u8; final_payload_len as usize];
 
                 match self.reader.read_exact(&mut buf).await {
                     Ok(0) => {
@@ -100,7 +119,7 @@ impl<R: AsyncRead + Unpin> Stream<R> {
                     Ok(n) => {
                         debug!("Received {n} bytes of data");
 
-                        let frame = Arc::new(Frame::decode(&buf, partial)?);
+                        let frame = Arc::new(Frame::decode(&buf, headers)?);
                         let writer = Arc::clone(&self.writer);
                         let ctx = Context::new(
                             self.state,
@@ -110,8 +129,8 @@ impl<R: AsyncRead + Unpin> Stream<R> {
                         );
                         self.broadcast(&ctx)?;
 
-                        if frame.partial.opcode == Opcode::Close {
-                            self.state = State::CLOSING
+                        if frame.headers.opcode == Opcode::Close {
+                            self.state = State::CLOSING;
                         }
 
                         Ok(())

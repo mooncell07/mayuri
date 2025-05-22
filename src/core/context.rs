@@ -47,8 +47,8 @@ impl Context {
         }
     }
 
-    pub async fn write_text(&self, msg: &str) -> Result<(), WebSocketError> {
-        let mut frame = Frame::set_defaults(Opcode::Text, msg.as_bytes());
+    pub async fn write_text(&self, msg: &[u8]) -> Result<(), WebSocketError> {
+        let mut frame = Frame::set_defaults(Opcode::Text, msg);
         let data = frame.encode()?;
         let mut writer = self.tcp_writer.lock().await;
         write_stream(&mut writer, &self.state, &data).await?;

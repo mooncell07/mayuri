@@ -67,7 +67,7 @@ impl HandshakeHeaders {
 }
 
 #[derive(Debug, Clone)]
-pub struct PartialFrame {
+pub struct Headers {
     pub fin: bool,
     pub rsv1: bool,
     pub rsv2: bool,
@@ -75,9 +75,16 @@ pub struct PartialFrame {
     pub opcode: Opcode,
     pub mask: bool,
     pub payload_len: u8,
+    pub payload_len_ext: u64,
+
+    // `extend_by` is 16 when `payload_len` is 126, this makes `stream` read a 16 bit
+    // uint `payload_len_ext` value. 64 when `payload_len` is 127.
+    // Only used during frame decoding. Set to 0 when encoding or when `payload_len` is
+    // enough.
+    pub extend_by: u8,
 }
 
-impl PartialFrame {
+impl Headers {
     pub fn decode(data: &[u8]) -> Result<Self, io::Error> {
         let mut cursor = Cursor::new(data);
         let byte0 = cursor.read_u8()?;
@@ -92,6 +99,14 @@ impl PartialFrame {
         let mask = (byte1 >> 7) != 0;
         let payload_len = byte1 & 0x7F;
 
+        let extend_by = if payload_len == MIN_VAL_FOR_16_BIT_UPGRADE {
+            16
+        } else if payload_len == MIN_VAL_FOR_64_BIT_UPGRADE {
+            64
+        } else {
+            0
+        };
+
         Ok(Self {
             fin,
             rsv1,
@@ -100,6 +115,8 @@ impl PartialFrame {
             opcode,
             mask,
             payload_len,
+            payload_len_ext: 0,
+            extend_by,
         })
     }
 
@@ -114,11 +131,18 @@ impl PartialFrame {
 
         let byte1 = (u8::from(self.mask) << 7) | self.payload_len;
         cursor.write_u8(byte1)?;
+
+        if self.payload_len == MIN_VAL_FOR_16_BIT_UPGRADE {
+            cursor.write_u16::<BigEndian>(self.payload_len_ext as u16)?;
+        } else if self.payload_len == MIN_VAL_FOR_64_BIT_UPGRADE {
+            cursor.write_u64::<BigEndian>(self.payload_len_ext)?;
+        }
+
         Ok(cursor.into_inner())
     }
 
     #[must_use]
-    pub const fn set_defaults(opcode: Opcode, payload_len: u8) -> Self {
+    pub const fn set_defaults(opcode: Opcode, payload_len: u8, payload_len_ext: u64) -> Self {
         Self {
             fin: true,
             rsv1: false,
@@ -127,66 +151,48 @@ impl PartialFrame {
             opcode,
             mask: true,
             payload_len,
+            payload_len_ext,
+            extend_by: 0,
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Frame {
-    pub partial: PartialFrame,
-
-    pub payload_len_ext: u64,
-    pub masking_key: Option<u32>,
+    pub headers: Headers,
     pub payload_data: Vec<u8>,
 }
 
 impl Frame {
-    pub fn decode(data: &[u8], partial: PartialFrame) -> Result<Self, io::Error> {
+    pub fn decode(data: &[u8], headers: Headers) -> Result<Self, io::Error> {
         let mut cursor = Cursor::new(data);
-        let final_payload_len: u64 = if partial.payload_len == MIN_VAL_FOR_16_BIT_UPGRADE {
-            u64::from(cursor.read_u16::<BigEndian>()?)
-        } else if partial.payload_len == MIN_VAL_FOR_64_BIT_UPGRADE {
-            cursor.read_u64::<BigEndian>()?
-        } else {
-            u64::from(partial.payload_len)
-        };
 
-        let payload_len_ext = if partial.payload_len >= MIN_VAL_FOR_16_BIT_UPGRADE {
-            final_payload_len
+        let final_payload_len = if headers.extend_by > 0 {
+            headers.payload_len_ext
         } else {
-            0u64
+            u64::from(headers.payload_len)
         };
 
         let mut payload_data = vec![0u8; final_payload_len as usize];
         cursor.read_exact(&mut payload_data)?;
 
         Ok(Self {
-            partial,
-            payload_len_ext,
-            masking_key: None,
+            headers,
             payload_data,
         })
     }
 
     pub fn encode(&mut self) -> Result<Vec<u8>, io::Error> {
         let mut cursor = Cursor::new(Vec::new());
-        cursor.write_all(&self.partial.encode()?)?;
+        let masking_key = Self::get_masking_key();
 
-        if self.partial.payload_len == MIN_VAL_FOR_16_BIT_UPGRADE {
-            cursor.write_u16::<BigEndian>(self.payload_len_ext as u16)?;
-        } else if self.partial.payload_len == MIN_VAL_FOR_64_BIT_UPGRADE {
-            cursor.write_u64::<BigEndian>(self.payload_len_ext)?;
-        }
-
-        let masking_key = 0u32;
-        cursor.write_u32::<BigEndian>(masking_key)?;
         for (i, byte) in self.payload_data.iter_mut().enumerate() {
             let key = 3 - (i % 4);
             *byte ^= ((masking_key >> (8 * key)) & 0xFF) as u8;
         }
 
-        self.masking_key = Some(masking_key);
-
+        cursor.write_all(&self.headers.encode()?)?;
+        cursor.write_u32::<BigEndian>(masking_key)?;
         cursor.write_all(&self.payload_data)?;
         Ok(cursor.into_inner())
     }
@@ -194,14 +200,9 @@ impl Frame {
     #[must_use]
     pub fn set_defaults(opcode: Opcode, data: &[u8]) -> Self {
         let (payload_len, payload_len_ext) = Self::get_payload_len(data.len());
-
-        let partial = PartialFrame::set_defaults(opcode, payload_len);
-        let masking_key = Some(Self::get_masking_key());
-
+        let headers = Headers::set_defaults(opcode, payload_len, payload_len_ext);
         Self {
-            partial,
-            payload_len_ext,
-            masking_key,
+            headers,
             payload_data: data.to_vec(),
         }
     }
