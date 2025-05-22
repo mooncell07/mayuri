@@ -1,13 +1,15 @@
-use super::errors::{HandshakeFailureError, URIError, WebSocketError};
-use super::frame::HandshakeHeaders;
-use super::utils::{CRLF, get_host, get_resource_target};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD;
+use super::{
+    errors::{HandshakeFailureError, URIError, WebSocketError},
+    frame::HandshakeHeaders,
+    utils::{ACCEPT_KEY_NAME, CRLF, get_host, get_resource_target},
+};
+use crate::safe_get_handshake_item;
+use base64::{Engine, engine::general_purpose::STANDARD};
+use fluent_uri::Uri;
 use log::debug;
 use rand::RngCore;
 use sha1::{Digest, Sha1};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use uris::Uri;
 
 const __GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -16,13 +18,13 @@ where
     W: AsyncWrite + Unpin,
     R: AsyncRead + Unpin,
 {
-    pub writer: &'a mut W,
     reader: &'a mut R,
-    uri: &'a Uri,
+    pub writer: &'a mut W,
+    uri: &'a Uri<String>,
 }
 
 impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Handshake<'a, R, W> {
-    pub fn new(reader: &'a mut R, writer: &'a mut W, uri: &'a Uri) -> Handshake<'a, R, W> {
+    pub fn new(reader: &'a mut R, writer: &'a mut W, uri: &'a Uri<String>) -> Self {
         Self {
             reader,
             writer,
@@ -30,8 +32,8 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Handshake<'a, R, W> {
         }
     }
     pub async fn run(&mut self) -> Result<(), WebSocketError> {
-        let security_key = Self::_generate_security_key();
-        let handshake_payload = Self::_get_handshake_payload(self.uri, security_key.as_str())?;
+        let security_key = Self::generate_security_key();
+        let handshake_payload = Self::get_handshake_payload(self.uri, security_key.as_str())?;
         self.writer.write_all(handshake_payload.as_bytes()).await?;
 
         debug!("Handshake Bytes sent to the server");
@@ -51,20 +53,20 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Handshake<'a, R, W> {
             handshake_headers.http_status_text
         );
 
-        Self::_validate_accept(
-            handshake_headers.headers["sec-websocket-accept"].as_str(),
-            security_key,
-        )?;
+        let accept =
+            safe_get_handshake_item!(handshake_headers.headers, ACCEPT_KEY_NAME, ACCEPT_KEY_NAME)?;
+
+        Self::validate_accept(accept.as_str(), security_key)?;
         Ok(())
     }
 
-    pub fn _generate_security_key() -> String {
+    fn generate_security_key() -> String {
         let mut bytes = vec![0u8; 16];
         rand::rng().fill_bytes(&mut bytes);
         STANDARD.encode(&bytes)
     }
 
-    fn _generate_valid_accept(security_key: String) -> String {
+    fn generate_valid_accept(security_key: String) -> String {
         let accept = security_key + __GUID;
         let mut hasher = Sha1::new();
         hasher.update(accept.as_bytes());
@@ -72,20 +74,30 @@ impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Handshake<'a, R, W> {
         STANDARD.encode(result)
     }
 
-    pub fn _validate_accept(
+    pub fn validate_accept(
         accept_key: &str,
         security_key: String,
     ) -> Result<(), HandshakeFailureError> {
-        let valid_accept_key = Self::_generate_valid_accept(security_key);
-        if accept_key != valid_accept_key {
-            Err(HandshakeFailureError::ValidationError)
-        } else {
-            debug!("`Sec-WebSocket-Accept` from Server's Handshake Bytes has been validated");
+        let valid_accept_key = Self::generate_valid_accept(security_key);
+        if accept_key == valid_accept_key {
+            debug!("{ACCEPT_KEY_NAME} from Server's Handshake Bytes has been validated");
             Ok(())
+        } else {
+            Err(HandshakeFailureError::ValidationError)
         }
     }
-    pub fn _get_handshake_payload(uri: &Uri, security_key: &str) -> Result<String, URIError> {
-        let host = get_host(uri)?;
+    fn get_handshake_payload(uri: &Uri<String>, security_key: &str) -> Result<String, URIError> {
+        let maybe_auth = uri.authority();
+        let auth = maybe_auth.map_or_else(
+            || {
+                Err(URIError::IncompleteURIError(
+                    "Authority for the URI is not found".into(),
+                ))
+            },
+            Ok,
+        )?;
+
+        let host = get_host(&auth);
         let target = get_resource_target(uri)?;
 
         Ok(format!(

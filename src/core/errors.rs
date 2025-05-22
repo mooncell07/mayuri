@@ -1,15 +1,13 @@
-use std::io;
-use thiserror::Error;
-use uris;
-
+use fluent_uri::error;
 use rustls_pki_types::InvalidDnsNameError;
-use std::string::FromUtf8Error;
+use std::{io, num::ParseIntError, string::FromUtf8Error};
 use strum;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum HandshakeFailureError {
-    #[error("Invalid Handshake Header")]
-    HeaderError,
+    #[error("Invalid Handshake Header: {0}")]
+    HeaderError(String),
 
     #[error("Handshake Validation Failed")]
     ValidationError,
@@ -20,11 +18,17 @@ pub enum URIError {
     #[error("Incomplete URI: {0}")]
     IncompleteURIError(String),
 
-    #[error("Malformed URI: {0}")]
-    MalformedURIError(#[from] uris::Error),
+    #[error("Malformed URI {0}")]
+    MalformedURIError(String),
+
+    #[error("URI couldnt be resolved")]
+    ResolveError(#[from] error::ResolveError),
 
     #[error("DNS Error: {0}")]
     DNSError(#[from] InvalidDnsNameError),
+
+    #[error("Bad Port Error: {0}")]
+    BadPortError(#[from] ParseIntError),
 }
 
 #[derive(Error, Debug)]

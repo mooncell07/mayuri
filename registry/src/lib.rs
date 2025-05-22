@@ -6,17 +6,19 @@ use syn::{Expr, Ident, ItemFn, Lit, Token, parse::Parser};
 use syn::{Meta, parse_macro_input, punctuated::Punctuated};
 
 fn get_crate(name: &str) -> proc_macro2::TokenStream {
-    let crate_found = crate_name(name).expect(&format!(
-        "{} must be present in Cargo.toml for #[register] macro to work",
-        name
-    ));
-    return match crate_found {
+    let crate_found = crate_name(name).unwrap_or_else(|_| {
+        panic!(
+            "{} must be present in Cargo.toml for #[register] macro to work",
+            name
+        )
+    });
+    match crate_found {
         FoundCrate::Itself => quote!(crate),
         FoundCrate::Name(name) => {
             let ident = Ident::new(&name, Span::call_site());
             quote!(::#ident)
         }
-    };
+    }
 }
 
 fn get_event_name(event_arg: TokenStream) -> String {
@@ -36,7 +38,7 @@ fn get_event_name(event_arg: TokenStream) -> String {
                     format!("Incorrect Identifier: {}\nPlease use `to=`", name)
                 );
             }
-            let value = match &nv.value {
+            match &nv.value {
                 Expr::Lit(s) => {
                     if let Lit::Str(e) = &s.lit {
                         e.value().to_lowercase()
@@ -45,8 +47,7 @@ fn get_event_name(event_arg: TokenStream) -> String {
                     }
                 }
                 _ => panic!("Invalid Expression in Event Argument"),
-            };
-            value
+            }
         }
         _ => {
             panic!(

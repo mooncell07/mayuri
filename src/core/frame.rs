@@ -1,17 +1,17 @@
-use super::enums::Opcode;
-use super::errors::HandshakeFailureError;
-use super::utils::CRLF;
-use byteorder::BigEndian;
-use byteorder::ReadBytesExt;
-use byteorder::WriteBytesExt;
+use super::{
+    enums::Opcode,
+    errors::{HandshakeFailureError, WebSocketError},
+    utils::CRLF,
+};
+use crate::safe_get_handshake_item;
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use rand::RngCore;
-use std::collections::HashMap;
-use std::io;
-use std::io::Cursor;
-use std::io::Read;
-use std::io::Write;
-
-const EXPECTED_STATUS_TEXT: &str = "HTTP/1.1 101 Switching Protocols";
+use std::{
+    collections::HashMap,
+    io::{Cursor, Read, Write},
+};
+use tokio::io;
+const EXPECTED_STATUS_LINE: &str = "HTTP/1.1 101 Switching Protocols";
 const MIN_VAL_FOR_16_BIT_UPGRADE: u8 = 0x7E;
 const MIN_VAL_FOR_64_BIT_UPGRADE: u8 = 0x7F;
 
@@ -24,14 +24,20 @@ pub struct HandshakeHeaders {
 }
 
 impl HandshakeHeaders {
-    pub fn new(data: &str) -> Result<HandshakeHeaders, HandshakeFailureError> {
+    pub fn new(data: &str) -> Result<Self, WebSocketError> {
         let lines: Vec<&str> = data.split(CRLF).collect();
 
-        if lines[0] != EXPECTED_STATUS_TEXT {
-            return Err(HandshakeFailureError::HeaderError);
+        let first_line = safe_get_handshake_item!(lines, 0, "status line")?;
+
+        if *first_line != EXPECTED_STATUS_LINE {
+            return Err(WebSocketError::Handshake(
+                HandshakeFailureError::HeaderError(format!(
+                    "Bad Status Line in handshake response: {first_line}"
+                )),
+            ));
         }
 
-        let headers_meta: Vec<&str> = lines[0].split_whitespace().collect();
+        let headers_meta: Vec<&str> = first_line.split_whitespace().collect();
         let headers: HashMap<String, String> = lines
             .iter()
             .filter_map(|line| {
@@ -43,10 +49,18 @@ impl HandshakeHeaders {
             })
             .collect();
 
+        let http_version =
+            (*safe_get_handshake_item!(headers_meta, 0, "http version")?).to_string();
+        let http_status_code =
+            (*safe_get_handshake_item!(headers_meta, 1, "http status code")?).to_string();
+
+        let http_status_text =
+            (*safe_get_handshake_item!(headers_meta, 2.., "http status text")?).join(" ");
+
         Ok(Self {
-            http_version: headers_meta[0].to_string(),
-            http_status_code: headers_meta[1].to_string(),
-            http_status_text: headers_meta[2..].join(" "),
+            http_version,
+            http_status_code,
+            http_status_text,
             headers,
         })
     }
@@ -81,11 +95,11 @@ impl Frame {
         let mask = (byte1 >> 7) != 0;
         let payload_len = byte1 & 0x7F;
         let final_payload_len: u64 = if payload_len == MIN_VAL_FOR_16_BIT_UPGRADE {
-            cursor.read_u16::<BigEndian>()? as u64
+            u64::from(cursor.read_u16::<BigEndian>()?)
         } else if payload_len == MIN_VAL_FOR_64_BIT_UPGRADE {
             cursor.read_u64::<BigEndian>()?
         } else {
-            payload_len as u64
+            u64::from(payload_len)
         };
 
         let payload_len_ext = if payload_len >= MIN_VAL_FOR_16_BIT_UPGRADE {
@@ -114,14 +128,14 @@ impl Frame {
     pub fn encode(&mut self) -> Result<Vec<u8>, io::Error> {
         let mut cursor = Cursor::new(Vec::new());
 
-        let byte0 = ((self.fin as u8) << 7)
-            | ((self.rsv1 as u8) << 6)
-            | ((self.rsv2 as u8) << 5)
-            | ((self.rsv3 as u8) << 4)
+        let byte0 = (u8::from(self.fin) << 7)
+            | (u8::from(self.rsv1) << 6)
+            | (u8::from(self.rsv2) << 5)
+            | (u8::from(self.rsv3) << 4)
             | self.opcode as u8;
         cursor.write_u8(byte0)?;
 
-        let byte1 = ((self.mask as u8) << 7) | self.payload_len;
+        let byte1 = (u8::from(self.mask) << 7) | self.payload_len;
         cursor.write_u8(byte1)?;
 
         if self.payload_len == MIN_VAL_FOR_16_BIT_UPGRADE {
@@ -143,9 +157,10 @@ impl Frame {
         Ok(cursor.into_inner())
     }
 
+    #[must_use]
     pub fn set_defaults(opcode: Opcode, data: &[u8]) -> Self {
-        let (payload_len, payload_len_ext) = Self::_get_payload_len(data.len());
-        let masking_key = Self::_get_masking_key();
+        let (payload_len, payload_len_ext) = Self::get_payload_len(data.len());
+        let masking_key = Some(Self::get_masking_key());
 
         Self {
             fin: true,
@@ -161,7 +176,7 @@ impl Frame {
         }
     }
 
-    pub fn _get_payload_len(len: usize) -> (u8, u64) {
+    const fn get_payload_len(len: usize) -> (u8, u64) {
         if len < MIN_VAL_FOR_16_BIT_UPGRADE as usize {
             (len as u8, 0u64)
         } else if len <= 0xFFFF {
@@ -171,8 +186,8 @@ impl Frame {
         }
     }
 
-    pub fn _get_masking_key() -> Option<u32> {
+    fn get_masking_key() -> u32 {
         let mut rng = rand::rng();
-        Some(rng.next_u32())
+        rng.next_u32()
     }
 }

@@ -1,15 +1,11 @@
-use tokio::io::AsyncWrite;
-
-use super::errors::{ConnectionError, ParseError};
-use super::stream::write_stream;
 use super::{
     enums::{Event, Opcode, State},
-    errors::WebSocketError,
+    errors::{ConnectionError, ParseError, WebSocketError},
     frame::Frame,
+    stream::write_stream,
 };
-use tokio::sync::Mutex;
-
 use std::sync::Arc;
+use tokio::{io::AsyncWrite, sync::Mutex};
 
 #[derive(Clone)]
 pub struct Context {
@@ -25,7 +21,7 @@ impl Context {
         event: Event,
         frame: Option<Arc<Frame>>,
         tcp_writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send>>>,
-    ) -> Context {
+    ) -> Self {
         Self {
             state,
             belongs_to: event,
@@ -36,12 +32,14 @@ impl Context {
 
     pub fn read_text(&self) -> Result<String, WebSocketError> {
         match self.belongs_to {
-            Event::OnMESSAGE => match &self.frame {
-                Some(f) => Ok(String::from_utf8_lossy(&f.payload_data).to_string()),
-                None => Err(WebSocketError::Parse(ParseError::FrameError(String::from(
-                    "Frame not available",
-                )))),
-            },
+            Event::OnMESSAGE => self.frame.as_ref().map_or_else(
+                || {
+                    Err(WebSocketError::Parse(ParseError::FrameError(String::from(
+                        "Frame not available",
+                    ))))
+                },
+                |f| Ok(String::from_utf8_lossy(&f.payload_data).to_string()),
+            ),
             _ => Err(WebSocketError::Stream(ConnectionError::ReadError(format!(
                 "Attempted to read TEXT data from a Context that belongs to {:?} Event",
                 self.belongs_to

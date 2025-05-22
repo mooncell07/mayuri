@@ -1,8 +1,18 @@
 [package]
 name = "mayuri"
+description = "An Asynchronous WebSocket Client Library."
 version = "0.1.0"
 edition = "2024"
-
+license = "MIT"
+repository = "https://github.com/mooncell07/mayuri"
+keywords = ["websocket", "async", "client"]
+categories = [
+  "web-programming",
+  "network-programming",
+  "web-programming::websocket",
+  "concurrency",
+  "asynchronous",
+]
 [workspace]
 members = ["registry"]
 
@@ -13,7 +23,7 @@ sha1 = "0.10"
 base64 = "0.22"
 rand = "0.9"
 byteorder = "1.5.0"
-uris = "0.1.1"
+fluent-uri = "0.3.2"
 thiserror = "2.0.12"
 linkme = "0.3"
 strum = { version = "0.27", features = ["derive"] }
@@ -22,4 +32,3 @@ env_logger = "0.11.8"
 rustls-pki-types = "1.12.0"
 tokio-rustls = "0.26.2"
 webpki-roots = "1.0.0"
-async-trait = "0.1.88"

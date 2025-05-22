@@ -1,7 +1,7 @@
 use std::io;
 use strum::EnumString;
 
-#[derive(Debug, Clone, EnumString, PartialEq)]
+#[derive(Debug, Clone, EnumString, PartialEq, Eq)]
 #[strum(serialize_all = "snake_case")]
 pub enum Event {
     OnCONNECT,
@@ -40,7 +40,7 @@ impl Opcode {
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
-                    format!("Bad Opcode {}", opcode),
+                    format!("Bad Opcode {opcode}"),
                 ));
             }
         })
