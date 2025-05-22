@@ -1,3 +1,5 @@
+use crate::core::{enums::Opcode, frame::PartialFrame};
+
 use super::{
     context::Context,
     enums::{Event, State},
@@ -14,9 +16,9 @@ use super::{
 use fluent_uri::Uri;
 use log::{debug, info};
 use rustls_pki_types::{CertificateDer, ServerName, pem::PemObject};
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::{path::PathBuf, usize};
 use tokio::sync::Mutex;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, split},
@@ -67,36 +69,61 @@ impl<R: AsyncRead + Unpin> Stream<R> {
         Ok(())
     }
 
+    pub async fn read_partial(&mut self) -> Result<PartialFrame, WebSocketError> {
+        let mut buf: [u8; 2] = [0; 2];
+        match self.reader.read_exact(&mut buf).await {
+            Ok(0) => Err(WebSocketError::Stream(ReadError(
+                "Couldn't read Frame Headers".into(),
+            ))),
+            Ok(_n) => {
+                debug!("Received Frame Headers");
+                Ok(PartialFrame::decode(&buf)?)
+            }
+            Err(err) => Err(WebSocketError::Stream(ReadError(format!(
+                "Unexpected EOF while reading Frame Headers: {err}"
+            )))),
+        }
+    }
+
     pub async fn read(&mut self) -> Result<(), WebSocketError> {
-        let mut buf: [u8; 4096] = [0; 4096];
         match self.state {
-            State::OPEN => match self.reader.read(&mut buf).await {
-                Ok(0) => {
-                    self.state = State::CLOSED;
-                    Err(WebSocketError::Stream(ReadError("Unexpected EOF".into())))
-                }
+            State::OPEN => {
+                let partial = self.read_partial().await?;
+                let mut buf = vec![0u8; partial.payload_len as usize];
 
-                Ok(n) => {
-                    debug!("Received {n} bytes of data");
-                    let frame = Arc::new(Frame::decode(&buf)?);
-                    let writer = Arc::clone(&self.writer);
-                    let ctx = Context::new(
-                        self.state,
-                        Event::OnMESSAGE,
-                        Some(Arc::clone(&frame)),
-                        writer,
-                    );
-                    self.broadcast(&ctx)?;
+                match self.reader.read_exact(&mut buf).await {
+                    Ok(0) => {
+                        self.state = State::CLOSED;
+                        Err(WebSocketError::Stream(ReadError("Unexpected EOF".into())))
+                    }
 
-                    Ok(())
+                    Ok(n) => {
+                        debug!("Received {n} bytes of data");
+
+                        let frame = Arc::new(Frame::decode(&buf, partial)?);
+                        let writer = Arc::clone(&self.writer);
+                        let ctx = Context::new(
+                            self.state,
+                            Event::OnMESSAGE,
+                            Some(Arc::clone(&frame)),
+                            writer,
+                        );
+                        self.broadcast(&ctx)?;
+
+                        if frame.partial.opcode == Opcode::Close {
+                            self.state = State::CLOSING
+                        }
+
+                        Ok(())
+                    }
+                    Err(err) => {
+                        self.state = State::CLOSED;
+                        Err(WebSocketError::Stream(ReadError(format!(
+                            "Unexpected EOF: {err}"
+                        ))))
+                    }
                 }
-                Err(err) => {
-                    self.state = State::CLOSED;
-                    Err(WebSocketError::Stream(ReadError(format!(
-                        "Unexpected EOF: {err}"
-                    ))))
-                }
-            },
+            }
             _ => Err(WebSocketError::Stream(ReadError(format!(
                 "Unknown State {:?}",
                 self.state

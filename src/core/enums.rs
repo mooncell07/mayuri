@@ -18,7 +18,7 @@ pub enum State {
     CLOSED = 3,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Opcode {
     Continuation = 0x0,
     Text = 0x1,
