@@ -32,7 +32,7 @@ impl WebSocket {
     pub async fn connect(uri_string: &str) -> Result<Self, WebSocketError> {
         env_logger::init();
         info!(
-            "Registered {} Listener(s)",
+            "Registered `{}` Listener(s)",
             LISTENER_FUTURE_INFO_SLICE.len()
         );
         let uri = get_uri(String::from(uri_string))?;
