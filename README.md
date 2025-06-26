@@ -38,3 +38,5 @@ async fn main() {
 }
 
 ```
+
+Currently the lib is WIP, at the moment only on_connect and on_message events are supported.
