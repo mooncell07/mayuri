@@ -8,40 +8,39 @@
 #![deny(clippy::panic)]
 #![deny(clippy::indexing_slicing)]
 #![allow(clippy::missing_errors_doc)]
-#![allow(clippy::missing_safety_doc)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::struct_excessive_bools)]
 pub mod core;
+pub use async_trait;
+pub use core::{
+    context::Context, errors::WebSocketError, protocol::WebSocketProtocol, transport::Transport,
+};
 
-pub use core::{context::Context, enums::Event, listener};
 use core::{
-    errors::WebSocketError,
-    listener::LISTENER_FUTURE_INFO_SLICE,
     stream::{StreamBuilder, StreamType},
     utils::{get_socket_address, get_uri},
 };
+
 use log::{debug, info};
-pub use registry::bind;
 use std::str;
 
-pub struct WebSocket {
-    stream: StreamType,
+pub struct WebSocket<P: WebSocketProtocol> {
+    stream: StreamType<P>,
 }
 
-impl WebSocket {
-    pub async fn connect(uri_string: &str) -> Result<Self, WebSocketError> {
+impl<P: WebSocketProtocol + Send + Sync + 'static> WebSocket<P> {
+    pub async fn connect(uri: &str, protocol: P) -> Result<Self, WebSocketError> {
         env_logger::init();
-        info!(
-            "Registered `{}` Listener(s)",
-            LISTENER_FUTURE_INFO_SLICE.len()
-        );
-        let uri = get_uri(String::from(uri_string))?;
+        let uri_obj = get_uri(String::from(uri))?;
         info!(
             "Attempting to create connection with {}",
-            get_socket_address(&uri)?
+            get_socket_address(&uri_obj)?
         );
 
-        let stream = StreamBuilder::new(uri, None)?.build_stream().await?;
+        let stream = StreamBuilder::new(uri_obj, None)?
+            .build_stream(protocol)
+            .await?;
+
         Ok(Self { stream })
     }
 

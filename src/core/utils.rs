@@ -1,3 +1,9 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicU8, Ordering},
+};
+
+use super::enums::State;
 use super::errors::URIError;
 use fluent_uri::{Uri, component::Authority, encoding::EStr};
 pub const CRLF: &str = "\r\n";
@@ -79,4 +85,11 @@ macro_rules! safe_get_handshake_item {
             Ok,
         )
     };
+}
+
+pub fn get_connection_state(store: &Arc<AtomicU8>) -> State {
+    State::from_repr(store.load(Ordering::Relaxed).into()).unwrap_or(State::ERROR)
+}
+pub fn set_connection_state(state: State, store: &Arc<AtomicU8>) {
+    store.store(state.as_u8(), Ordering::Relaxed);
 }

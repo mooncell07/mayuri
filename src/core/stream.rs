@@ -1,25 +1,29 @@
+use crate::core::utils::set_connection_state;
+
 use super::{
     context::Context,
-    enums::{Event, Opcode, State},
+    enums::{Opcode, State},
     errors::{
-        ConnectionError::{self, ReadError, WriteError},
+        ConnectionError::{self, ReadError},
         ParseError, URIError, WebSocketError,
     },
     frame::{Frame, Headers},
     handshake::Handshake,
-    listener::LISTENER_FUTURE_INFO_SLICE,
-    utils::{get_host, get_socket_address, is_secured},
+    protocol::WebSocketProtocol,
+    transport::Transport,
+    utils::{get_connection_state, get_host, get_socket_address, is_secured},
 };
 use fluent_uri::Uri;
 use log::{debug, info};
 use rustls_pki_types::{CertificateDer, ServerName, pem::PemObject};
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU8;
 use tokio::sync::Mutex;
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, split},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, split},
     net::TcpStream,
+    spawn,
 };
 use tokio_rustls::{
     TlsConnector,
@@ -28,14 +32,16 @@ use tokio_rustls::{
 };
 use webpki_roots;
 
-pub struct Stream<R> {
+pub struct Stream<P: WebSocketProtocol, R> {
+    user_protocol: Arc<Mutex<P>>,
     reader: R,
-    pub writer: Arc<Mutex<Box<dyn AsyncWrite + Unpin + Send + 'static>>>,
-    pub state: State,
+    transport: Transport,
+    pub state: Arc<AtomicU8>,
 }
 
-impl<R: AsyncRead + Unpin> Stream<R> {
+impl<P: WebSocketProtocol + Send + Sync + 'static, R: AsyncRead + Unpin> Stream<P, R> {
     pub async fn new<W: AsyncWrite + Unpin + Send + 'static>(
+        user_protocol: P,
         mut reader: R,
         mut writer: W,
         uri: &Uri<String>,
@@ -47,23 +53,36 @@ impl<R: AsyncRead + Unpin> Stream<R> {
         }
         debug!("Handshake complete");
 
-        let stream = Self {
-            writer: Arc::new(Mutex::new(Box::new(writer))),
+        let state = Arc::new(AtomicU8::new(State::OPEN.as_u8()));
+        let transport = Self::get_transport(writer, Arc::clone(&state))?;
+        let user_protocol = Arc::new(Mutex::new(user_protocol));
+        let mut stream = Self {
+            user_protocol,
             reader,
-            state: State::OPEN,
+            transport,
+            state,
         };
 
-        info!("Connection established with {}", get_socket_address(uri)?);
+        stream.post_init();
 
-        stream.post_new()?;
+        info!("Connection established with {}", get_socket_address(uri)?);
 
         Ok(stream)
     }
 
-    pub fn post_new(&self) -> Result<(), ParseError> {
-        let ctx = Context::new(self.state, Event::OnCONNECT, None, Arc::clone(&self.writer));
-        self.broadcast(&ctx)?;
-        Ok(())
+    pub fn get_transport<W: AsyncWrite + Unpin + Send + 'static>(
+        writer: W,
+        state: Arc<AtomicU8>,
+    ) -> Result<Transport, ParseError> {
+        let transport = Transport::new(Arc::new(Mutex::new(Box::new(writer))), state);
+
+        Ok(transport)
+    }
+
+    pub fn post_init(&mut self) {
+        let proto = Arc::clone(&self.user_protocol);
+        let transport = self.transport.clone();
+        spawn(async move { proto.lock().await.on_connect(transport).await });
     }
 
     pub async fn fetch_headers(&mut self) -> Result<Headers, WebSocketError> {
@@ -94,7 +113,8 @@ impl<R: AsyncRead + Unpin> Stream<R> {
     }
 
     pub async fn read(&mut self) -> Result<(), WebSocketError> {
-        match self.state {
+        let state = get_connection_state(&self.state);
+        match state {
             State::OPEN => {
                 let headers = self.fetch_headers().await?;
 
@@ -112,85 +132,54 @@ impl<R: AsyncRead + Unpin> Stream<R> {
 
                 match self.reader.read_exact(&mut buf).await {
                     Ok(0) => {
-                        self.state = State::CLOSED;
+                        set_connection_state(State::CLOSED, &self.state);
                         Err(WebSocketError::Stream(ReadError("Unexpected EOF".into())))
                     }
 
                     Ok(n) => {
                         debug!("Received {n} bytes of data");
 
-                        let frame = Arc::new(Frame::decode(&buf, headers)?);
-                        let writer = Arc::clone(&self.writer);
-                        let ctx = Context::new(
-                            self.state,
-                            Event::OnMESSAGE,
-                            Some(Arc::clone(&frame)),
-                            writer,
-                        );
-                        self.broadcast(&ctx)?;
+                        let frame = Frame::decode(&buf, headers)?;
+                        let opcode = frame.headers.opcode;
+                        let ctx = Context::new(frame)?;
 
-                        if frame.headers.opcode == Opcode::Close {
-                            self.state = State::CLOSING;
+                        let proto = Arc::clone(&self.user_protocol);
+                        if opcode == Opcode::Close {
+                            debug!("WebSocket Connection is closing now");
+
+                            set_connection_state(State::CLOSING, &self.state);
+                            let mut frame = Frame::set_defaults(Opcode::Close, b"1000");
+                            self.transport.write(&mut frame).await?;
+                            tokio::spawn(async move { proto.lock().await.on_close(ctx).await });
+                        } else {
+                            tokio::spawn(async move { proto.lock().await.on_message(ctx).await });
                         }
 
                         Ok(())
                     }
                     Err(err) => {
-                        self.state = State::CLOSED;
+                        set_connection_state(State::CLOSED, &self.state);
                         Err(WebSocketError::Stream(ReadError(format!(
                             "Unexpected EOF: {err}"
                         ))))
                     }
                 }
             }
+
+            State::CLOSED => Err(WebSocketError::Stream(ConnectionError::ReadError(
+                String::from("Connection is Closed"),
+            ))),
             _ => Err(WebSocketError::Stream(ReadError(format!(
                 "Unknown State {:?}",
                 self.state
             )))),
         }
     }
-
-    pub fn broadcast(&self, context: &Context) -> Result<(), ParseError> {
-        info!("Broadcasting Event: `{:?}`", context.belongs_to);
-        for listener_future_info in LISTENER_FUTURE_INFO_SLICE {
-            let user_event = listener_future_info.belongs_to;
-            let mapped_event =
-                Event::from_str(user_event).map_err(|e| ParseError::InvalidEventError {
-                    error_event: user_event.to_string(),
-                    source: e,
-                })?;
-            if mapped_event == context.belongs_to {
-                let ctx = context.clone();
-                tokio::spawn(async move {
-                    (listener_future_info.listener_future_callback)(ctx).await;
-                });
-            };
-        }
-
-        Ok(())
-    }
 }
 
-pub async fn write_stream(
-    tcp_writer: &mut Box<(dyn AsyncWrite + Send + Unpin + 'static)>,
-    state: &State,
-    data: &[u8],
-) -> Result<(), ConnectionError> {
-    match state {
-        State::OPEN => match tcp_writer.write_all(data).await {
-            Ok(_n) => {
-                debug!("Sent {} bytes of data", data.len());
-                Ok(())
-            }
-            Err(err) => Err(WriteError(format!("Couldn't Write to the Stream: {err}"))),
-        },
-        _ => Err(WriteError(format!("Unknown State {state:?}"))),
-    }
-}
-
-pub enum StreamType {
-    Plain(Stream<ReadHalf<TcpStream>>),
-    Secured(Stream<ReadHalf<TlsStream<TcpStream>>>),
+pub enum StreamType<P: WebSocketProtocol> {
+    Plain(Stream<P, ReadHalf<TcpStream>>),
+    Secured(Stream<P, ReadHalf<TlsStream<TcpStream>>>),
 }
 
 pub struct StreamBuilder {
@@ -245,34 +234,39 @@ impl StreamBuilder {
         Ok(tls_stream)
     }
 
-    async fn create_secured_stream(
+    async fn create_secured_stream<P: WebSocketProtocol + Send + Sync + 'static>(
         &self,
+        user_protocol: P,
         uri: &Uri<String>,
-    ) -> Result<Stream<ReadHalf<TlsStream<TcpStream>>>, WebSocketError> {
+    ) -> Result<Stream<P, ReadHalf<TlsStream<TcpStream>>>, WebSocketError> {
         let addr = get_socket_address(uri)?;
         let tcp_stream = TcpStream::connect(addr).await?;
         let tls_stream = self.wrap_tls(tcp_stream, uri).await?;
 
         let (tls_reader, tls_writer) = split(tls_stream);
-        Stream::new(tls_reader, tls_writer, uri).await
+        Stream::new(user_protocol, tls_reader, tls_writer, uri).await
     }
 
-    async fn create_plain_stream(
+    async fn create_plain_stream<P: WebSocketProtocol + Send + Sync + 'static>(
         &self,
+        user_protocol: P,
         uri: &Uri<String>,
-    ) -> Result<Stream<ReadHalf<TcpStream>>, WebSocketError> {
+    ) -> Result<Stream<P, ReadHalf<TcpStream>>, WebSocketError> {
         let addr = get_socket_address(uri)?;
         let tcp_stream = TcpStream::connect(addr).await?;
 
         let (tcp_reader, tcp_writer) = split(tcp_stream);
-        Stream::new(tcp_reader, tcp_writer, uri).await
+        Stream::new(user_protocol, tcp_reader, tcp_writer, uri).await
     }
 
-    pub async fn build_stream(&self) -> Result<StreamType, WebSocketError> {
+    pub async fn build_stream<P: WebSocketProtocol + Send + Sync + 'static>(
+        &self,
+        user_protocol: P,
+    ) -> Result<StreamType<P>, WebSocketError> {
         let stream_type = if is_secured(&self.uri) {
-            StreamType::Secured(self.create_secured_stream(&self.uri).await?)
+            StreamType::Secured(self.create_secured_stream(user_protocol, &self.uri).await?)
         } else {
-            StreamType::Plain(self.create_plain_stream(&self.uri).await?)
+            StreamType::Plain(self.create_plain_stream(user_protocol, &self.uri).await?)
         };
         Ok(stream_type)
     }

@@ -1,21 +1,21 @@
 use std::io;
-use strum::EnumString;
+use strum::FromRepr;
 
-#[derive(Debug, Clone, EnumString, PartialEq, Eq)]
-#[strum(serialize_all = "snake_case")]
-pub enum Event {
-    OnCONNECT,
-    OnMESSAGE,
-    OnERROR,
-    OnDISCONNECT,
-}
-
-#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, FromRepr)]
 pub enum State {
     CONNECTING = 0,
     OPEN = 1,
     CLOSING = 2,
     CLOSED = 3,
+    ERROR = 4,
+}
+
+impl State {
+    #[must_use]
+    pub const fn as_u8(&self) -> u8 {
+        *self as u8
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -38,10 +38,7 @@ impl Opcode {
             0x9 => Self::Ping,
             0xA => Self::Pong,
             _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Bad Opcode {opcode}"),
-                ));
+                return Err(io::Error::other(format!("Bad Opcode {opcode}")));
             }
         })
     }

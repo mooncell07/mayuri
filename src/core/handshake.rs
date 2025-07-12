@@ -24,7 +24,7 @@ where
 }
 
 impl<'a, R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Handshake<'a, R, W> {
-    pub fn new(reader: &'a mut R, writer: &'a mut W, uri: &'a Uri<String>) -> Self {
+    pub const fn new(reader: &'a mut R, writer: &'a mut W, uri: &'a Uri<String>) -> Self {
         Self {
             reader,
             writer,
