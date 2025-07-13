@@ -10,6 +10,7 @@ use super::frame::Frame;
 use super::utils::get_connection_state;
 
 use log::debug;
+use std::fmt;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::sync::Mutex;
 
@@ -55,5 +56,11 @@ impl Transport {
         let mut frame = Frame::set_defaults(Opcode::Text, msg);
         self.write(&mut frame).await?;
         Ok(())
+    }
+}
+
+impl fmt::Debug for Transport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Transport [{:?}]", get_connection_state(&self.state))
     }
 }
