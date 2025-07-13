@@ -1,7 +1,10 @@
 # mayuri
 A WIP Asynchronous WebSocket Client Library.
 
-# Usage
+## Installation
+Install the [mayuri](https://crates.io/crates/mayuri) crate from crates-io.
+
+## Usage
 
 ```rs
 use async_trait::async_trait;
@@ -35,4 +38,4 @@ async fn main() {
     ws.run().await.unwrap();
 }
 ```
-
+Find more in [examples](../examples/).
