@@ -38,4 +38,4 @@ async fn main() {
     ws.run().await.unwrap();
 }
 ```
-Find more in [examples](../examples/).
+Find more in [examples](../master/examples/).
